@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TaskAssignment",
+  "description": "Estructura JSON que el Leader usa para asignar tareas a subagentes del harness",
+  "type": "object",
+  "required": ["assignmentId", "agent", "task", "instructions", "outputFile"],
+  "properties": {
+    "assignmentId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID único de esta asignación"
+    },
+    "agent": {
+      "type": "string",
+      "enum": [
+        "leader",
+        "reviewer",
+        "explorer",
+        "developer",
+        "security",
+        "server-ssh",
+        "test",
+        "integration",
+        "document",
+        "environment",
+        "migration",
+        "documentation",
+        "database"
+      ],
+      "description": "Subagente que ejecutará la tarea"
+    },
+    "task": {
+      "type": "object",
+      "required": ["taskId", "type", "description"],
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUID de la tarea del proyecto"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["feature", "bugfix", "refactor", "investigation", "deploy", "health-check"],
+          "description": "Tipo de trabajo a realizar"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "description": "Descripción detallada de la tarea"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "default": "medium",
+          "description": "Prioridad de la tarea"
+        },
+        "targetFiles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Archivos específicos a modificar o revisar"
+        },
+        "context": {
+          "type": "object",
+          "description": "Datos adicionales relevantes para la tarea"
+        }
+      },
+      "additionalProperties": false
+    },
+    "instructions": {
+      "type": "string",
+      "description": "Instrucciones detalladas para el agente. NO resumir — incluir toda la información necesaria para que el agente trabaje de forma autónoma."
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "assignmentIds que deben completarse antes de que este agente pueda empezar"
+    },
+    "outputFile": {
+      "type": "string",
+      "description": "Ruta del archivo donde el agente debe escribir su resultado completo (ej: progress/explorer.md)"
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 600,
+      "default": 120,
+      "description": "Tiempo máximo de ejecución en segundos"
+    },
+    "requiresConfirmation": {
+      "type": "boolean",
+      "default": false,
+      "description": "Si es true, el agente debe pedir confirmación al Leader antes de ejecutar acciones destructivas"
+    },
+    "confirmationLog": {
+      "type": "string",
+      "description": "Ruta del archivo donde se loguean las acciones confirmadas (usado por server-ssh)"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "assignmentId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "agent": "developer",
+      "task": {
+        "taskId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "type": "feature",
+        "description": "Añadir DISCARDED al enum de TaskStatus y filtrar tareas sin valor en CalendarService",
+        "priority": "high",
+        "targetFiles": [
+          "src/tasks/entities/task-status.enum.ts",
+          "src/calendar/calendar.service.ts"
+        ]
+      },
+      "instructions": "1. Añadir DISCARDED = 'DISCARDED' al enum TaskStatus en task-status.enum.ts. 2. En calendar.service.ts, añadir lógica para detectar tareas de Moodle sin valor (pase de lista, 'sube un video', firma, etc.) y marcarlas como DISCARDED en lugar de ATTENDANCE. 3. No enviar tareas DISCARDED a n8n. 4. Escribir resultado en progress/developer.md.",
+      "dependencies": [],
+      "outputFile": "progress/developer.md",
+      "timeout": 180,
+      "requiresConfirmation": false
+    }
+  ]
+}

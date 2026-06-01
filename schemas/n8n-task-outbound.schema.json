@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "N8nTaskOutbound",
+  "description": "Payload que el backend envía al webhook de n8n para procesamiento con Gemini",
+  "type": "object",
+  "required": ["taskId", "title", "description"],
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID de la tarea en la base de datos"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Título de la tarea extraído del evento ICS"
+    },
+    "description": {
+      "type": "string",
+      "description": "Descripción original enriquecida con contenido extraído de PDFs/DOCX adjuntos"
+    },
+    "dueDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Fecha de vencimiento en formato ISO 8601"
+    },
+    "assignedDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Fecha de asignación en formato ISO 8601"
+    },
+    "subjectName": {
+      "type": "string",
+      "default": "",
+      "description": "Nombre de la asignatura extraído de las categorías del ICS"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "taskId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "title": "Ensayo sobre la Revolución Mexicana",
+      "description": "Redactar un ensayo de 5 páginas sobre las causas y consecuencias de la Revolución Mexicana.",
+      "dueDate": "2026-06-15T23:59:00.000Z",
+      "assignedDate": "2026-06-01T08:00:00.000Z",
+      "subjectName": "Historia de México"
+    }
+  ]
+}

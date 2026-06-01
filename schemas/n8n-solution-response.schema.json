@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "N8nSolutionResponse",
+  "description": "Payload que n8n/Gemini devuelve al backend en la respuesta HTTP síncrona",
+  "type": "object",
+  "required": ["content", "subjectName", "taskType"],
+  "properties": {
+    "subjectName": {
+      "type": "string",
+      "description": "Nombre de la asignatura deducida por Gemini. Enviar 'DESCONOCIDA' si no se puede determinar."
+    },
+    "taskType": {
+      "type": "string",
+      "enum": [
+        "ESSAY",
+        "CODE_SNIPPET",
+        "UML_DIAGRAM",
+        "PRESENTATION",
+        "READING",
+        "EXAM",
+        "ATTENDANCE",
+        "OTHER",
+        "MATH_PROBLEM",
+        "LAB_REPORT",
+        "RESEARCH_PAPER",
+        "CASE_STUDY",
+        "PORTFOLIO",
+        "WORKSHEET",
+        "DISCARDED"
+      ],
+      "description": "Tipo de tarea detectado por Gemini. Enum extensible — se pueden añadir más valores según se analicen nuevos tipos de tareas."
+    },
+    "content": {
+      "type": "string",
+      "description": "Solución completa en formato Markdown. El título debe ir como H1 (# Título) dentro del contenido."
+    },
+    "metadata_analisis": {
+      "type": ["object", "null"],
+      "description": "Metadatos opcionales del análisis de Gemini. El backend puede usar estos datos para optimizar la generación del PDF.",
+      "properties": {
+        "confianza_deteccion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Nivel de confianza de Gemini en la detección del tipo de tarea (0-1)"
+        },
+        "palabras_clave": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Palabras clave extraídas de la tarea para indexación"
+        },
+        "requisitos_formato": {
+          "type": "object",
+          "description": "Requisitos de formato detectados para la generación del PDF",
+          "properties": {
+            "fuente": {
+              "type": "string",
+              "default": "Arial",
+              "description": "Familia de fuente recomendada"
+            },
+            "tamano_fuente": {
+              "type": "integer",
+              "default": 12,
+              "minimum": 8,
+              "maximum": 24,
+              "description": "Tamaño de fuente en puntos"
+            },
+            "extension_esperada": {
+              "type": "string",
+              "description": "Extensión del archivo esperada (ej: .pdf, .docx, .py)"
+            }
+          }
+        }
+      }
+    },
+    "plano_diapositivas": {
+      "type": ["object", "null"],
+      "description": "Solo para taskType=PRESENTATION. Debe ser null para todos los demás tipos de tarea.",
+      "properties": {
+        "estilo_visual": {
+          "type": "string",
+          "enum": ["minimal_light", "minimal_dark"],
+          "description": "Estilo visual de las diapositivas"
+        },
+        "slides": {
+          "type": "array",
+          "description": "Lista de diapositivas de la presentación",
+          "items": {
+            "type": "object",
+            "required": ["num_slide", "layout", "titulo", "contenido"],
+            "properties": {
+              "num_slide": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Número de diapositiva"
+              },
+              "layout": {
+                "type": "string",
+                "enum": ["titulo_centrado", "dos_columnas", "lista_bullets"],
+                "description": "Tipo de layout de la diapositiva"
+              },
+              "titulo": {
+                "type": "string",
+                "description": "Título de la diapositiva"
+              },
+              "contenido": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Contenido de la diapositiva (párrafos o bullets)"
+              },
+              "notas_orador": {
+                "type": "string",
+                "description": "Notas del orador para esta diapositiva"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "subjectName": "Historia de México",
+      "taskType": "ESSAY",
+      "content": "# Ensayo sobre la Revolución Mexicana\n\n## Introducción\nLa Revolución Mexicana fue un conflicto armado...",
+      "metadata_analisis": {
+        "confianza_deteccion": 0.95,
+        "palabras_clave": ["ensayo", "revolución", "mexicana", "historia"],
+        "requisitos_formato": {
+          "fuente": "Times New Roman",
+          "tamano_fuente": 12,
+          "extension_esperada": ".pdf"
+        }
+      },
+      "plano_diapositivas": null
+    }
+  ]
+}

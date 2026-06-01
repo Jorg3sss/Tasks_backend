@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentResponse",
+  "description": "Estructura JSON que los subagentes devuelven al Leader al completar una tarea",
+  "type": "object",
+  "required": ["assignmentId", "agent", "status", "outputFile"],
+  "properties": {
+    "assignmentId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID de la asignación (debe coincidir con el assignmentId recibido)"
+    },
+    "agent": {
+      "type": "string",
+      "description": "Nombre del agente que respondió"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial", "failed", "blocked", "needs_input"],
+      "description": "Estado de la ejecución"
+    },
+    "outputFile": {
+      "type": "string",
+      "description": "Ruta del archivo donde se escribió el resultado completo"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Resumen corto del resultado (SOLO para el leader, el detalle va en outputFile)"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Lista de errores encontrados durante la ejecución"
+    },
+    "nextAction": {
+      "type": "string",
+      "enum": ["continue", "retry", "escalate_to_user", "skip", "blocked"],
+      "description": "Acción sugerida para el Leader después de esta respuesta"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "assignmentId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "agent": "developer",
+      "status": "success",
+      "outputFile": "progress/developer.md",
+      "summary": "DISCARDED añadido al enum. CalendarService filtra tareas sin valor. 2 archivos modificados.",
+      "errors": [],
+      "nextAction": "continue"
+    },
+    {
+      "assignmentId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "agent": "server-ssh",
+      "status": "needs_input",
+      "outputFile": "progress/server-ssh.md",
+      "summary": "Container n8n detenido. ¿Reiniciar?",
+      "errors": ["docker: n8n container is stopped"],
+      "nextAction": "escalate_to_user"
+    }
+  ]
+}

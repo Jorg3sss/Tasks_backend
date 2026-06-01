@@ -1,0 +1,96 @@
+{
+  "$schema": "https://opencode.ai/schema.json",
+  "project": "Homework Solution Platform - Backend",
+  "description": "NestJS backend que sincroniza tareas de Moodle y genera soluciones con IA (Gemini vía n8n)",
+  "agents": {
+    "leader": {
+      "file": ".opencode/agents/leader.md",
+      "description": "Orquestador principal. Evalúa complejidad, asigna agentes, aprueba acciones SSH."
+    },
+    "reviewer": {
+      "file": ".opencode/agents/reviewer.md",
+      "description": "Revisa código contra reglas del proyecto, ejecuta lint/build, escribe feedback."
+    },
+    "explorer": {
+      "file": ".opencode/agents/explorer.md",
+      "description": "Investiga código, busca patrones, encuentra dependencias."
+    },
+    "developer": {
+      "file": ".opencode/agents/developer.md",
+      "description": "Implementa código, modifica archivos directamente, crea features."
+    },
+    "security": {
+      "file": ".opencode/agents/security.md",
+      "description": "Audita secrets, vulnerabilidades, configuración, CORS, inyección."
+    },
+    "server-ssh": {
+      "file": ".opencode/agents/server-ssh.md",
+      "description": "SSH al VPS: verificar servicios, puertos, logs, deploy (con confirmación)."
+    },
+    "test": {
+      "file": ".opencode/agents/test.md",
+      "description": "Genera y ejecuta tests unitarios/e2e, reporta cobertura."
+    },
+    "integration": {
+      "file": ".opencode/agents/integration.md",
+      "description": "Debug de llamadas a n8n, Gemini, SMTP, .ics."
+    },
+    "document": {
+      "file": ".opencode/agents/document.md",
+      "description": "Maneja pipeline PDF/DOCX (PDFKit, pdf-lib, mammoth, pdf-parse)."
+    },
+    "environment": {
+      "file": ".opencode/agents/environment.md",
+      "description": "Valida .env, Docker, SSH tunnel, diferencia local/prod."
+    },
+    "migration": {
+      "file": ".opencode/agents/migration.md",
+      "description": "Genera migraciones TypeORM, maneja rollback, valida SQL."
+    },
+    "documentation": {
+      "file": ".opencode/agents/documentation.md",
+      "description": "Escribe README, documenta módulos, genera docs del proyecto en markdown."
+    },
+    "database": {
+      "file": ".opencode/agents/database.md",
+      "description": "Diseña tablas, optimiza queries, normalización, índices, consultas."
+    }
+  },
+  "rules": {
+    "hard": [
+      "Nunca hardcodear secrets — siempre usar .env",
+      "Enriquecer descripciones antes de enviar a n8n (DocumentParserService)",
+      "Lanzar reviewer después de cada implementación",
+      "Crear rama nueva + commit (feat:/fix:/chore:) por cada cambio de código",
+      "No empezar NADA si health-check falla — arreglar primero",
+      "Verificar SSH tunnel activo antes de conectar a BD local",
+      "Cifrar contraseñas (bcrypt), no exponer datos sensibles en logs",
+      "Tareas de Moodle sin valor → DISCARDED, no enviar a n8n",
+      "Seguir estructura del proyecto existente",
+      "Ejecutar tests y code review antes de marcar COMPLETED",
+      "Usar variables .env — nunca hardcodear valores",
+      "Ejecutar verificación de seguridad en cada cambio",
+      "Seguir feedback de security — si hay issues, crear features",
+      "Guardar todos los logs en logs/ y progress/",
+      "Subagentes escriben resultados en archivos, NO en chat"
+    ]
+  },
+  "workflow": {
+    "git": {
+      "remote": "https://github.com/Jorg3sss/Tasks_backend.git",
+      "branchPrefix": {
+        "feature": "feat/",
+        "bugfix": "fix/",
+        "chore": "chore/",
+        "docs": "docs/",
+        "test": "test/",
+        "refactor": "refactor/"
+      },
+      "commitPrefixes": ["feat:", "fix:", "chore:", "docs:", "test:", "refactor:", "style:", "perf:"]
+    },
+    "taskStates": ["pending", "in_progress", "review", "completed", "blocked", "discarded"],
+    "progressDir": "progress/",
+    "logsDir": "logs/",
+    "schemasDir": "schemas/"
+  }
+}

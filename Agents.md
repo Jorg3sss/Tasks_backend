@@ -271,3 +271,150 @@ src/
 - **Webhook Security:** All webhook endpoints must validate the `N8N_SECRET_KEY` header.
 - **Audit Logs:** Every API request to external AI models must be logged.
 - **Document Enrichment:** All paths that send tasks to n8n (CalendarService, requestSolution, SchedulerService) must enrich descriptions with DocumentParserService.
+
+## 13. Engineering Harness
+
+Sistema de 13 subagentes opencode orquestados por el Leader para automatizar desarrollo, verificación, despliegue y mantenimiento del proyecto.
+
+### Agentes
+
+| # | Agente | Archivo | Rol |
+|---|--------|---------|-----|
+| 1 | **leader** | `.opencode/agents/leader.md` | Orquestador principal. Evalúa complejidad, asigna agentes, aprueba acciones SSH |
+| 2 | **reviewer** | `.opencode/agents/reviewer.md` | Revisa código contra reglas, ejecuta lint/build, escribe feedback |
+| 3 | **explorer** | `.opencode/agents/explorer.md` | Investiga código, busca patrones, encuentra dependencias |
+| 4 | **developer** | `.opencode/agents/developer.md` | Implementa código, modifica archivos directamente, crea features |
+| 5 | **security** | `.opencode/agents/security.md` | Audita secrets, vulnerabilidades, configuración, CORS, inyección |
+| 6 | **server-ssh** | `.opencode/agents/server-ssh.md` | SSH al VPS: verificar servicios, puertos, logs, deploy (con confirmación) |
+| 7 | **test** | `.opencode/agents/test.md` | Genera y ejecuta tests unitarios/e2e, reporta cobertura |
+| 8 | **integration** | `.opencode/agents/integration.md` | Debug de llamadas a n8n, Gemini, SMTP, .ics |
+| 9 | **document** | `.opencode/agents/document.md` | Maneja pipeline PDF/DOCX (PDFKit, pdf-lib, mammoth, pdf-parse) |
+| 10 | **environment** | `.opencode/agents/environment.md` | Valida .env, Docker, SSH tunnel, diferencia local/prod |
+| 11 | **migration** | `.opencode/agents/migration.md` | Genera migraciones TypeORM, maneja rollback, valida SQL |
+| 12 | **documentation** | `.opencode/agents/documentation.md` | Escribe README, documenta módulos, genera docs en markdown |
+| 13 | **database** | `.opencode/agents/database.md` | Diseña tablas, optimiza queries, normalización, índices |
+
+### Comunicación entre Agentes
+Los subagentes SIEMPRE escriben resultados completos en `progress/[nombre-agente].md`. NUNCA resumen en el chat. Esto evita el problema del "teléfono descompuesto" donde la información se pierde al pasar entre agentes.
+
+### Archivos de Progress
+| Archivo | Propósito | Quién escribe |
+|---------|-----------|---------------|
+| `progress/currents.md` | Estado actual, última tarea | Leader |
+| `progress/review.md` | Feedback del reviewer | Reviewer |
+| `progress/history.md` | Histórico de tareas completadas | Leader (append) |
+| `progress/errors.md` | Errores y soluciones | Cualquier agente |
+| `progress/explorer.md` | Resultados de investigación | Explorer |
+| `progress/developer.md` | Código implementado | Developer |
+| `progress/test.md` | Resultados de tests | Test |
+| `progress/security.md` | Hallazgos de seguridad | Security |
+| `progress/server-ssh.md` | Estado del servidor | Server-SSH |
+| `progress/ssh-actions.md` | Acciones SSH ejecutadas | Server-SSH |
+
+### Schemas JSON
+| Schema | Propósito |
+|--------|-----------|
+| `schemas/n8n-task-outbound.schema.json` | Payload Backend → n8n |
+| `schemas/n8n-solution-response.schema.json` | Respuesta n8n → Backend |
+| `schemas/task-assignment.schema.json` | Asignación Leader → Subagente |
+| `schemas/agent-response.schema.json` | Respuesta Subagente → Leader |
+
+### Configuración
+- **opencode.json:** `.opencode/opencode.json` — Configuración de agentes y reglas
+- **feature_list.json:** Lista de features con estado y prioridad
+
+## 14. Reglas Duras del Harness
+
+| ID | Regla | Categoría |
+|----|-------|-----------|
+| R001 | Nunca hardcodear secrets — siempre usar `.env` | security |
+| R002 | Enriquecer descripciones antes de enviar a n8n (DocumentParserService) | workflow |
+| R003 | Lanzar reviewer después de cada implementación | workflow |
+| R004 | Crear rama nueva + commit (`feat:`/`fix:`/`chore:`) por cada cambio de código. Push a `https://github.com/Jorg3sss/Tasks_backend.git` | workflow |
+| R005 | No empezar NADA si health-check falla — arreglar primero | workflow |
+| R006 | Verificar SSH tunnel activo antes de conectar a BD local | environment |
+| R007 | Cifrar contraseñas (bcrypt), no exponer datos sensibles en logs | security |
+| R008 | Tareas de Moodle sin valor (pase de lista, "sube un video") → `DISCARDED`, no enviar a n8n | workflow |
+| R009 | Seguir estructura del proyecto existente (ver sección 10) | architecture |
+| R010 | Ejecutar tests y code review antes de marcar COMPLETED | workflow |
+| R011 | Usar variables `.env` — nunca hardcodear valores | security |
+| R012 | Ejecutar verificación de seguridad en cada cambio | security |
+| R013 | Seguir feedback de security — si hay issues, crear features en `feature_list.json` | security |
+| R014 | Guardar todos los logs en `logs/` y `progress/` | workflow |
+| R015 | Subagentes escriben resultados en archivos, NO en chat (anti-teléfono-descompuesto) | workflow |
+
+## 15. Estados de Tarea
+
+| Estado | Significado |
+|--------|-------------|
+| `pending` | Nadie asignado aún |
+| `in_progress` | Agente trabajando en ella |
+| `review` | Esperando revisión del reviewer |
+| `completed` | Terminada y aprobada |
+| `blocked` | No se puede avanzar (dependencia o error) |
+| `discarded` | Tarea sin valor (pase de lista, "sube un video", etc.) |
+
+## 16. Protocolo de Desbloqueo
+
+Si un agente se bloquea:
+1. Leer `progress/errors.md` por errores previos similares
+2. Leer `Agents.md` sección relevante
+3. Usar `explorer` para investigar código relacionado
+4. Si es problema de servidor → usar `server-ssh` para diagnosticar
+5. Si persiste → escribir en `progress/errors.md` y escalar al usuario
+
+## 17. Git Workflow
+
+Por cada cambio de código:
+1. Crear rama: `git checkout -b feat/nombre-feature`
+2. Implementar cambios
+3. Commit: `git commit -m "feat: descripción breve"`
+4. Push: `git push origin feat/nombre-feature`
+
+### Prefijos de Commit
+- `feat:` — Nueva feature
+- `fix:` — Bug fix
+- `chore:` — Mantenimiento
+- `docs:` — Documentación
+- `test:` — Tests
+- `refactor:` — Refactorización
+- `style:` — Formato/estilo
+- `perf:` — Performance
+
+## 18. Anti-Teléfono-Descompuesto
+
+### Regla Absoluta
+Los subagentes NUNCA resumen resultados en el chat. SIEMPRE escriben resultados completos en archivos.
+
+### Flujo Obligatorio
+1. Agente escribe resultado COMPLETO en `progress/[nombre].md`
+2. Siguiente agente LEE el archivo directamente (no recibe resumen del leader)
+3. Si un agente no entiende algo → lee el archivo directamente → NO pregunta al leader
+
+### Ejemplo Correcto
+```
+Explorer escribe en progress/explorer.md:
+"En tasks.service.ts:142, processAiCallback usa WebhookSolutionDto 
+con campos: content, subjectName, taskType. El campo content se guarda 
+como contenidoMarkdown en Solution.entity:18"
+
+Developer LEE progress/explorer.md → implementa basándose en el archivo
+```
+
+### Ejemplo Incorrecto (Teléfono Descompuesto)
+```
+Explorer le dice al leader: "El schema necesita content, subjectName y taskType"
+Leader le dice al developer: "Usa content, subjectName y taskType"
+Developer no sabe de dónde vienen ni el contexto exacto
+```
+
+## 19. Filtro de Tareas DISCARDED
+
+Tareas de Moodle que no requieren procesamiento IA se marcan como `DISCARDED`:
+- Pase de lista / asistencia (ya manejado como `ATTENDANCE`)
+- "Sube un video como entrega"
+- "Firma electrónica"
+- Tareas sin instrucciones claras
+- Tareas repetidas o de prueba
+
+Estas tareas se crean en BD para tracking pero NO se envían a n8n.

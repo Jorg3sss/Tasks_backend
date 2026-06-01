@@ -1,0 +1,154 @@
+{
+  "project": "Homework Solution Platform",
+  "description": "Backend NestJS que sincroniza tareas de Moodle desde un calendario .ics, las procesa con IA (Gemini vía n8n) y genera soluciones académicas en PDF con portada personalizada.",
+  "rules": [
+    { "id": "R001", "rule": "Nunca hardcodear secrets — siempre usar .env", "severity": "hard", "category": "security" },
+    { "id": "R002", "rule": "Enriquecer descripciones antes de enviar a n8n (DocumentParserService)", "severity": "hard", "category": "workflow" },
+    { "id": "R003", "rule": "Lanzar reviewer después de cada implementación", "severity": "hard", "category": "workflow" },
+    { "id": "R004", "rule": "Crear rama nueva + commit (feat:/fix:/chore:) por cada cambio de código", "severity": "hard", "category": "workflow" },
+    { "id": "R005", "rule": "No empezar NADA si health-check falla — arreglar primero", "severity": "hard", "category": "workflow" },
+    { "id": "R006", "rule": "Verificar SSH tunnel activo antes de conectar a BD local", "severity": "hard", "category": "environment" },
+    { "id": "R007", "rule": "Cifrar contraseñas (bcrypt), no exponer datos sensibles en logs", "severity": "hard", "category": "security" },
+    { "id": "R008", "rule": "Tareas de Moodle sin valor (pase de lista, 'sube un video') → DISCARDED", "severity": "hard", "category": "workflow" },
+    { "id": "R009", "rule": "Seguir estructura del proyecto existente", "severity": "hard", "category": "architecture" },
+    { "id": "R010", "rule": "Ejecutar tests y code review antes de marcar COMPLETED", "severity": "hard", "category": "workflow" },
+    { "id": "R011", "rule": "Usar variables .env — nunca hardcodear valores", "severity": "hard", "category": "security" },
+    { "id": "R012", "rule": "Ejecutar verificación de seguridad en cada cambio", "severity": "hard", "category": "security" },
+    { "id": "R013", "rule": "Seguir feedback de security — si hay issues, crear features", "severity": "hard", "category": "security" },
+    { "id": "R014", "rule": "Guardar todos los logs en logs/ y progress/", "severity": "hard", "category": "workflow" },
+    { "id": "R015", "rule": "Subagentes escriben resultados en archivos, NO en chat (anti-teléfono-descompuesto)", "severity": "hard", "category": "workflow" }
+  ],
+  "features": [
+    {
+      "id": "F001",
+      "name": "calendar_sync",
+      "title": "Sincronización de calendario Moodle",
+      "description": "Parsear archivo .ics de Moodle y crear tareas automáticamente en la base de datos con detección de asistencia y tareas descartadas.",
+      "acceptance": [
+        "Dado un URL .ics válido, cuando se registra entonces se crean las tareas en BD",
+        "Dado un evento duplicado (mismo externalEventId), cuando se re-sincroniza entonces no se crea duplicado",
+        "Dado un evento de asistencia, cuando se detecta entonces se marca como ATTENDANCE y no se envía a n8n",
+        "Dado un evento sin valor (pase de lista, 'sube un video'), cuando se detecta entonces se marca como DISCARDED"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "createdAt": "2026-05-19T00:00:00Z",
+      "completedAt": "2026-05-19T00:00:00Z"
+    },
+    {
+      "id": "F002",
+      "name": "n8n_gemini_integration",
+      "title": "Integración con n8n + Gemini",
+      "description": "Enviar tareas al webhook de n8n, recibir soluciones de Gemini de forma síncrona, procesar respuestas y generar solución.",
+      "acceptance": [
+        "Backend envía payload correcto (taskId, title, description, dueDate, assignedDate, subjectName) a n8n",
+        "n8n responde con content, subjectName, taskType en el HTTP response body",
+        "Backend procesa respuesta con processAiCallback y genera PDF",
+        "Rate limit: máximo 1 tarea por ciclo, 5s de delay entre tareas"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "createdAt": "2026-05-19T00:00:00Z",
+      "completedAt": "2026-05-22T00:00:00Z"
+    },
+    {
+      "id": "F003",
+      "name": "pdf_generation",
+      "title": "Generación de PDF con portada",
+      "description": "Generar PDF profesional con contenido Markdown, portada personalizada (pdf-lib merge) o portada por defecto (PDFKit).",
+      "acceptance": [
+        "PDF se genera con contenido Markdown formateado",
+        "Si el usuario tiene portada personalizada, se mergea como primera página con pdf-lib",
+        "Si no tiene portada, se genera portada por defecto con PDFKit",
+        "Para CODE_SNIPPET se genera ZIP adicional con archivos de código"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "createdAt": "2026-05-19T00:00:00Z",
+      "completedAt": "2026-05-22T00:00:00Z"
+    },
+    {
+      "id": "F004",
+      "name": "document_parser",
+      "title": "Enriquecimiento de documentos adjuntos",
+      "description": "Escanear descripciones en busca de URLs de PDFs/DOCX, descargarlos, extraer texto y enriquecer la descripción antes de enviar a n8n.",
+      "acceptance": [
+        "Detecta URLs que terminan en .pdf o .docx en la descripción",
+        "Extrae texto de PDFs con pdf-parse",
+        "Extrae texto de DOCX con mammoth",
+        "Si falla la extracción, continúa con la descripción original (no aborta)"
+      ],
+      "status": "completed",
+      "priority": "medium",
+      "createdAt": "2026-05-19T00:00:00Z",
+      "completedAt": "2026-05-22T00:00:00Z"
+    },
+    {
+      "id": "F005",
+      "name": "cover_page_module",
+      "title": "Módulo de portadas personalizadas",
+      "description": "Permitir al usuario subir su propia portada PDF o generar una con IA usando sus datos de perfil.",
+      "acceptance": [
+        "GET /api/covers retorna la portada activa del usuario",
+        "POST /api/covers/upload acepta PDF multipart (max 10MB)",
+        "POST /api/covers/generate genera portada con datos del perfil",
+        "DELETE /api/covers elimina la portada del usuario"
+      ],
+      "status": "completed",
+      "priority": "medium",
+      "createdAt": "2026-05-22T00:00:00Z",
+      "completedAt": "2026-05-22T00:00:00Z"
+    },
+    {
+      "id": "F006",
+      "name": "scheduler_retry",
+      "title": "Reintentos automáticos del scheduler",
+      "description": "SchedulerService reintenta tareas PENDING sin solución cada 10 minutos.",
+      "acceptance": [
+        "Ejecuta 45s después del arranque del módulo",
+        "Reintenta cada 10 minutos",
+        "Procesa máximo 1 tarea por ciclo",
+        "Delay de 5s entre llamadas a n8n"
+      ],
+      "status": "completed",
+      "priority": "medium",
+      "createdAt": "2026-05-19T00:00:00Z",
+      "completedAt": "2026-05-19T00:00:00Z"
+    },
+    {
+      "id": "F007",
+      "name": "task_type_enum_extensible",
+      "title": "Enum de TaskType extensible",
+      "description": "Añadir nuevos tipos de tarea al enum (MATH_PROBLEM, LAB_REPORT, etc.) y añadir DISCARDED al TaskStatus.",
+      "acceptance": [
+        "DISCARDED añadido a TaskStatus",
+        "MATH_PROBLEM, LAB_REPORT, RESEARCH_PAPER, CASE_STUDY, PORTFOLIO, WORKSHEET añadidos a TaskType",
+        "CalendarService filtra tareas DISCARDED (no envía a n8n)",
+        "Schema de n8n actualizado con nuevos tipos"
+      ],
+      "status": "backlog",
+      "priority": "medium",
+      "assignedAgent": "developer"
+    },
+    {
+      "id": "F008",
+      "name": "engineering_harness",
+      "title": "Engineering Harness completo",
+      "description": "Sistema de 13 subagentes opencode, schemas JSON, health check, feature tracking, git workflow, tests unitarios.",
+      "acceptance": [
+        "13 agentes configurados en .opencode/agents/",
+        "4 schemas JSON en schemas/",
+        "Health check script funcional (local + VPS)",
+        "feature_list.json poblado con features actuales",
+        "Agents.md actualizado con secciones 13-18",
+        "ESLint instalado y configurado",
+        "Jest instalado con test unitario de processAiCallback",
+        "Git workflow configurado (ramas + commits)"
+      ],
+      "status": "in_progress",
+      "priority": "high",
+      "assignedAgent": "developer",
+      "createdAt": "2026-05-31T00:00:00Z"
+    }
+  ]
+}
