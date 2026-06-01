@@ -1,6 +1,6 @@
 import {
   Injectable, NotFoundException,
-  ConflictException, Logger,
+  ConflictException, Logger, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository }       from 'typeorm';
@@ -17,6 +17,9 @@ import { WebhookSolutionDto } from '../webhooks/dto/webhook-solution.dto';
 import { ConfigService }      from '@nestjs/config';
 import { CoversService }      from '../covers/covers.service';
 import { DocumentParserService } from '../common/document-parser.service';
+import { N8nSolutionResponseDto, PlanoDiapositivasDto } from '../harness/dto/n8n-solution-response.dto';
+import { SolucionValidatorService } from '../harness/solucion-validator.service';
+import { PresentationValidatorService } from '../harness/presentation-validator.service';
 
 @Injectable()
 export class TasksService {
@@ -36,6 +39,8 @@ export class TasksService {
     private readonly configService:   ConfigService,
     private readonly coversService:   CoversService,
     private readonly documentParser:  DocumentParserService,
+    private readonly solucionValidator:     SolucionValidatorService,
+    private readonly presentationValidator: PresentationValidatorService,
   ) {}
 
   // ── Consultas ──────────────────────────────────────────────────────
@@ -87,6 +92,7 @@ export class TasksService {
   async processAiCallback(
     taskId: string,
     payload: WebhookSolutionDto,
+    planoDiapositivas?: PlanoDiapositivasDto | null,
   ): Promise<Solution> {
     const task = await this.findById(taskId);
 
@@ -137,6 +143,7 @@ export class TasksService {
         correo:       task.user.correo,
       },
       customCoverPath,
+      planoDiapositivas,
     );
 
     // ── 4. Generar ZIP para tareas de código ───────────────────────
@@ -170,6 +177,99 @@ export class TasksService {
     return saved;
   }
 
+  /**
+   * Procesa la respuesta estructurada de n8n con el nuevo formato DTO.
+   * Valida la solución y el plano de diapositivas antes de generar el PDF.
+   */
+  async processN8nResponse(
+    taskId: string,
+    dto: N8nSolutionResponseDto,
+  ): Promise<Solution> {
+    // ── Validar solución académica ──────────────────────────────────
+    const validacion = this.solucionValidator.validar(
+      dto.solucion_academica,
+      dto.metadata_analisis.requisitos_formato,
+    );
+
+    if (!validacion.valida) {
+      this.logger.warn(`Solución inválida para tarea ${taskId}: ${validacion.errores.join('; ')}`);
+      throw new BadRequestException(
+        `La solución no cumple los requisitos: ${validacion.errores.join('; ')}`,
+      );
+    }
+
+    this.logger.log(
+      `Validación OK: ${validacion.estadisticas.palabras} palabras, ~${validacion.estadisticas.cuartillasEstimadas} cuartillas`,
+    );
+
+    // ── Validar plano de diapositivas (si existe) ───────────────────
+    if (this.presentationValidator.requiereGeneracionPresentacion(dto.plano_diapositivas)) {
+      const validacionPres = this.presentationValidator.validar(dto.plano_diapositivas);
+      if (!validacionPres.valida) {
+        this.logger.warn(`Plano de diapositivas inválido: ${validacionPres.errores.join('; ')}`);
+        throw new BadRequestException(
+          `El plano de diapositivas no es válido: ${validacionPres.errores.join('; ')}`,
+        );
+      }
+      this.logger.log(`Presentación validada: ${validacionPres.totalSlides} slides`);
+    }
+
+    // ── Adaptar al formato legacy de processAiCallback ──────────────
+    // La generación del PDF con presentación se hará dentro de processAiCallback
+    // pasando el plano como parámetro adicional
+    const legacyPayload: WebhookSolutionDto = {
+      content: dto.solucion_academica.desarrollo_markdown,
+      subjectName: 'DESCONOCIDA',
+      taskType: dto.metadata_analisis.taskType,
+    };
+
+    // Si hay plano de diapositivas, guardarlo para uso posterior en PDF
+    if (dto.plano_diapositivas) {
+      this.logger.log(`Plano de diapositivas detectado: ${dto.plano_diapositivas.slides?.length ?? 0} slides`);
+    }
+
+    return this.processAiCallback(taskId, legacyPayload, dto.plano_diapositivas);
+  }
+
+  // ── Candado anti-duplicados (idempotencia) ────────────────────────
+
+  /**
+   * Adquiere el candado PROCESSING antes de enviar a n8n.
+   * Si la tarea ya está en PROCESSING, lanza ConflictException.
+   * Retorna la tarea actualizada para que el caller proceda.
+   */
+  async acquireProcessingLock(taskId: string): Promise<Task> {
+    const task = await this.findById(taskId);
+
+    if (task.status === TaskStatus.PROCESSING) {
+      throw new ConflictException(
+        `La tarea ${taskId} ya está siendo procesada por IA. Espera a que termine.`,
+      );
+    }
+
+    if (task.solution) {
+      throw new ConflictException(
+        `La tarea ${taskId} ya tiene una solución registrada.`,
+      );
+    }
+
+    const previousStatus = task.status;
+    await this.taskRepo.update(taskId, { status: TaskStatus.PROCESSING });
+    this.logger.log(`Candado adquirido: tarea ${taskId} ${previousStatus} → PROCESSING`);
+
+    return { ...task, status: TaskStatus.PROCESSING };
+  }
+
+  /**
+   * Libera el candado y revierte el estado en caso de error.
+   * Restaura el estado anterior (PENDING u OVERDUE) para permitir reintentos.
+   */
+  async releaseProcessingLock(taskId: string, revertTo?: TaskStatus): Promise<void> {
+    const targetStatus = revertTo ?? TaskStatus.PENDING;
+    await this.taskRepo.update(taskId, { status: targetStatus });
+    this.logger.log(`Candado liberado: tarea ${taskId} → ${targetStatus}`);
+  }
+
   // ── Solicitud manual de solución IA ───────────────────────────────
 
   /**
@@ -190,43 +290,52 @@ export class TasksService {
 
     const secret = this.configService.get<string>('N8N_SECRET_KEY', '');
 
-    // Enriquecer descripción con contenido de PDFs/DOCX adjuntos
-    const enrichedDescription = await this.documentParser.enrichDescription(
-      task.description ?? '',
-    );
+    // ── Candado anti-duplicados ─────────────────────────────────────
+    await this.acquireProcessingLock(taskId);
 
-    const { default: axios } = await import('axios');
-    const response = await axios.post(
-      n8nUrl,
-      {
-        taskId:      task.id,
-        title:       task.title,
-        description: enrichedDescription,
-        dueDate:     task.dueDate  ? new Date(task.dueDate).toISOString()  : '',
-        assignedDate: task.assignedDate ? new Date(task.assignedDate).toISOString() : '',
-        subjectName: task.subject?.name ?? '',
-      },
-      {
-        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': secret },
-        timeout: 120_000,
-      },
-    );
+    try {
+      // Enriquecer descripción con contenido de PDFs/DOCX adjuntos
+      const enrichedDescription = await this.documentParser.enrichDescription(
+        task.description ?? '',
+      );
 
-    // n8n now returns the solution directly in the response
-    const solutionData = response.data;
-    this.logger.log(`Solución recibida de n8n para "${task.title}" (${taskId})`);
-    this.logger.log(`  taskType=${solutionData.taskType}, subjectName=${solutionData.subjectName}, content length=${solutionData.content?.length || 0}`);
+      const { default: axios } = await import('axios');
+      const response = await axios.post(
+        n8nUrl,
+        {
+          taskId:      task.id,
+          title:       task.title,
+          description: enrichedDescription,
+          dueDate:     task.dueDate  ? new Date(task.dueDate).toISOString()  : '',
+          assignedDate: task.assignedDate ? new Date(task.assignedDate).toISOString() : '',
+          subjectName: task.subject?.name ?? '',
+        },
+        {
+          headers: { 'Content-Type': 'application/json', 'x-webhook-secret': secret },
+          timeout: 120_000,
+        },
+      );
 
-    if (solutionData.content && solutionData.taskType) {
-      await this.processAiCallback(taskId, {
-        content:     solutionData.content,
-        subjectName: solutionData.subjectName || '',
-        taskType:    solutionData.taskType,
-      });
-      this.logger.log(`Solución procesada y guardada para "${task.title}" (${taskId})`);
+      // n8n now returns the solution directly in the response
+      const solutionData = response.data;
+      this.logger.log(`Solución recibida de n8n para "${task.title}" (${taskId})`);
+      this.logger.log(`  taskType=${solutionData.taskType}, subjectName=${solutionData.subjectName}, content length=${solutionData.content?.length || 0}`);
+
+      if (solutionData.content && solutionData.taskType) {
+        await this.processAiCallback(taskId, {
+          content:     solutionData.content,
+          subjectName: solutionData.subjectName || '',
+          taskType:    solutionData.taskType,
+        });
+        this.logger.log(`Solución procesada y guardada para "${task.title}" (${taskId})`);
+      }
+
+      return { queued: true };
+    } catch (err: any) {
+      // Revertir estado a PENDING en caso de error para permitir reintentos
+      await this.releaseProcessingLock(taskId, TaskStatus.PENDING);
+      throw err;
     }
-
-    return { queued: true };
   }
 
   // ── Creación desde .ics ────────────────────────────────────────────

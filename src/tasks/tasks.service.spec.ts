@@ -13,6 +13,8 @@ import { MailService } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { CoversService } from '../covers/covers.service';
 import { DocumentParserService } from '../common/document-parser.service';
+import { SolucionValidatorService } from '../harness/solucion-validator.service';
+import { PresentationValidatorService } from '../harness/presentation-validator.service';
 
 describe('TasksService', () => {
   let service: TasksService;
@@ -110,6 +112,25 @@ describe('TasksService', () => {
     enrichDescription: jest.fn(),
   };
 
+  const mockSolucionValidator = {
+    validar: jest.fn().mockReturnValue({
+      valida: true,
+      errores: [],
+      estadisticas: { palabras: 500, cuartillasEstimadas: 2, parrafos: 10, lineasCodigo: 0 },
+      estilosRenderizado: { fuente: 'Arial', tamanoFuente: 12, interlineado: 1.5 },
+    }),
+  };
+
+  const mockPresentationValidator = {
+    validar: jest.fn().mockReturnValue({
+      valida: true,
+      errores: [],
+      totalSlides: 0,
+      layoutsDetectados: {},
+    }),
+    requiereGeneracionPresentacion: jest.fn().mockReturnValue(false),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -123,6 +144,8 @@ describe('TasksService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CoversService, useValue: mockCoversService },
         { provide: DocumentParserService, useValue: mockDocumentParser },
+        { provide: SolucionValidatorService, useValue: mockSolucionValidator },
+        { provide: PresentationValidatorService, useValue: mockPresentationValidator },
       ],
     }).compile();
 
@@ -251,6 +274,7 @@ describe('TasksService', () => {
         validPayload.taskType,
         expect.any(Object),
         expect.stringContaining('custom-cover.pdf'),
+        undefined, // planoDiapositivas
       );
     });
   });

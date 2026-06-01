@@ -14,11 +14,13 @@ import { WebhooksModule }  from './webhooks/webhooks.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { CoversModule }    from './covers/covers.module';
 import { CommonModule }    from './common/common.module';
+import { HarnessModule }    from './harness/harness.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     CommonModule,
+    HarnessModule,
 
     // Sirve ./public en / — los PDFs quedan en /uploads/pdfs/
     ServeStaticModule.forRoot({

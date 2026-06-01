@@ -3,6 +3,7 @@ import { join }    from 'path';
 import { mkdir, readFile }   from 'fs/promises';
 import { createWriteStream } from 'fs';
 import { PDFDocument } from 'pdf-lib';
+import { PlanoDiapositivasDto, SlideDto } from '../harness/dto/n8n-solution-response.dto';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocumentKit = require('pdfkit');
 
@@ -26,6 +27,7 @@ export class PdfService {
     taskType:  string = 'OTHER',
     cover?:    CoverData,
     customCoverPath?: string,
+    planoDiapositivas?: PlanoDiapositivasDto | null,
   ): Promise<string> {
     const outputDir  = join(process.cwd(), 'public', 'uploads', 'pdfs');
     const filename   = `solucion-${taskId}.pdf`;
@@ -33,6 +35,21 @@ export class PdfService {
     const publicPath = `/uploads/pdfs/${filename}`;
 
     await mkdir(outputDir, { recursive: true });
+
+    // Si hay plano de diapositivas, generar PDF con Puppeteer
+    if (planoDiapositivas?.slides?.length) {
+      await this.generatePresentationPdf(
+        planoDiapositivas,
+        taskTitle,
+        content,
+        taskId,
+        cover,
+        customCoverPath,
+        outputPath,
+      );
+      this.logger.log(`PDF presentación: ${publicPath}`);
+      return publicPath;
+    }
 
     if (customCoverPath) {
       // Usar portada personalizada: generar contenido y mergear
@@ -44,6 +61,290 @@ export class PdfService {
 
     this.logger.log(`PDF: ${publicPath}`);
     return publicPath;
+  }
+
+  // ── Motor de Presentaciones con Puppeteer ────────────────────────
+
+  /**
+   * Genera un PDF de presentación usando Puppeteer (headless Chrome).
+   * Configurado para Docker en VPS: --no-sandbox, --disable-setuid-sandbox.
+   * Viewport: 1920x1080 (16:9 panorámico).
+   * Usa break-after: page para saltos de página perfectos.
+   */
+  async generatePresentationPdf(
+    plano: PlanoDiapositivasDto,
+    taskTitle: string,
+    content: string,
+    taskId: string,
+    cover?: CoverData,
+    customCoverPath?: string,
+    outputPath?: string,
+  ): Promise<Buffer> {
+    const output = outputPath ?? join(process.cwd(), 'public', 'uploads', 'pdfs', `solucion-${taskId}.pdf`);
+
+    let puppeteer: any;
+    try {
+      puppeteer = await import('puppeteer-core');
+    } catch {
+      throw new InternalServerErrorException(
+        'puppeteer-core no está instalado. Ejecuta: npm install puppeteer-core',
+      );
+    }
+
+    // Buscar ejecutable de Chrome/Chromium
+    const executablePath = this.findChromeExecutable();
+    if (!executablePath) {
+      throw new InternalServerErrorException(
+        'No se encontró Chrome/Chromium. Configura CHROME_PATH en .env o instala Chrome.',
+      );
+    }
+
+    let browser: any = null;
+    try {
+      browser = await puppeteer.launch({
+        executablePath,
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      });
+
+      const page = await browser.newPage();
+
+      // Viewport panorámico 16:9
+      await page.setViewport({ width: 1920, height: 1080 });
+
+      // Generar HTML dinámico
+      const html = this.buildPresentationHtml(plano, taskTitle, cover);
+
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      // Generar PDF con saltos de página
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        landscape: true,
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+
+      // Guardar en disco
+      const fs = await import('fs/promises');
+      await fs.writeFile(output, pdfBuffer);
+
+      this.logger.log(`Presentación generada: ${plano.slides.length} slides → ${output}`);
+      return pdfBuffer;
+    } catch (err: any) {
+      this.logger.error(`Error generando presentación: ${err.message}`);
+      throw new InternalServerErrorException(`Error generando presentación: ${err.message}`);
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+  }
+
+  // ── HTML Builder para Presentaciones ─────────────────────────────
+
+  private buildPresentationHtml(
+    plano: PlanoDiapositivasDto,
+    taskTitle: string,
+    cover?: CoverData,
+  ): string {
+    const isDark = plano.estilo_visual === 'minimal_dark';
+    const bgColor = isDark ? '#1a1a2e' : '#ffffff';
+    const textColor = isDark ? '#e0e0e0' : '#1e3a5f';
+    const accentColor = '#c9a84c';
+    const subtitleColor = isDark ? '#a0a0a0' : '#6b7280';
+    const slideBg = isDark ? '#16213e' : '#f8fafc';
+
+    const slidesHtml = plano.slides
+      .map(slide => this.buildSlideHtml(slide, isDark, bgColor, textColor, accentColor, subtitleColor, slideBg))
+      .join('\n');
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    @page { size: A4 landscape; margin: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+      background: ${bgColor};
+      color: ${textColor};
+    }
+    .slide {
+      width: 100%;
+      min-height: 100vh;
+      padding: 60px 80px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      break-after: page;
+      page-break-after: always;
+      position: relative;
+      background: ${slideBg};
+    }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    .slide-header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, ${accentColor}, ${textColor}, ${accentColor});
+    }
+    .slide-number {
+      position: absolute;
+      bottom: 20px;
+      right: 40px;
+      font-size: 12px;
+      color: ${subtitleColor};
+    }
+    h1 { font-size: 2.5em; margin-bottom: 20px; color: ${textColor}; }
+    h2 { font-size: 1.8em; margin-bottom: 16px; color: ${accentColor}; }
+    p { font-size: 1.2em; line-height: 1.6; color: ${textColor}; }
+    ul { list-style: none; padding: 0; }
+    ul li {
+      font-size: 1.1em;
+      padding: 12px 0;
+      border-bottom: 1px solid ${isDark ? '#2a2a4a' : '#e5e7eb'};
+      color: ${textColor};
+    }
+    ul li::before {
+      content: '▸';
+      color: ${accentColor};
+      font-weight: bold;
+      margin-right: 12px;
+    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; flex: 1; }
+    .col { padding: 20px; }
+    .titulo-centrado {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      flex: 1;
+    }
+    .titulo-centrado h1 { font-size: 3em; }
+    .titulo-centrado p { font-size: 1.4em; margin-top: 20px; }
+    .speaker-notes {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: ${isDark ? '#0f3460' : '#eff6ff'};
+      border-left: 3px solid ${accentColor};
+      font-size: 0.9em;
+      color: ${subtitleColor};
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+${slidesHtml}
+</body>
+</html>`;
+  }
+
+  private buildSlideHtml(
+    slide: SlideDto,
+    _isDark: boolean,
+    _bgColor: string,
+    textColor: string,
+    accentColor: string,
+    subtitleColor: string,
+    _slideBg: string,
+  ): string {
+    const notesHtml = slide.notas_orador
+      ? `<div class="speaker-notes">Notas: ${this.escapeHtml(slide.notas_orador)}</div>`
+      : '';
+
+    switch (slide.layout) {
+      case 'titulo_centrado':
+        return `<div class="slide">
+  <div class="slide-header"></div>
+  <div class="titulo-centrado">
+    <h1>${this.escapeHtml(slide.titulo)}</h1>
+    ${slide.contenido.map(c => `<p>${this.escapeHtml(c)}</p>`).join('\n    ')}
+  </div>
+  <div class="slide-number">${slide.num_slide}</div>
+  ${notesHtml}
+</div>`;
+
+      case 'dos_columnas':
+        const mid = Math.ceil(slide.contenido.length / 2);
+        const col1 = slide.contenido.slice(0, mid);
+        const col2 = slide.contenido.slice(mid);
+        return `<div class="slide">
+  <div class="slide-header"></div>
+  <h2>${this.escapeHtml(slide.titulo)}</h2>
+  <div class="two-col">
+    <div class="col">
+      ${col1.map(c => `<p style="margin-bottom:16px">${this.escapeHtml(c)}</p>`).join('\n      ')}
+    </div>
+    <div class="col">
+      ${col2.map(c => `<p style="margin-bottom:16px">${this.escapeHtml(c)}</p>`).join('\n      ')}
+    </div>
+  </div>
+  <div class="slide-number">${slide.num_slide}</div>
+  ${notesHtml}
+</div>`;
+
+      case 'lista_bullets':
+      default:
+        return `<div class="slide">
+  <div class="slide-header"></div>
+  <h2>${this.escapeHtml(slide.titulo)}</h2>
+  <ul>
+    ${slide.contenido.map(c => `<li>${this.escapeHtml(c)}</li>`).join('\n    ')}
+  </ul>
+  <div class="slide-number">${slide.num_slide}</div>
+  ${notesHtml}
+</div>`;
+    }
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  private findChromeExecutable(): string | null {
+    // Buscar variable de entorno primero
+    const envPath = process.env.CHROME_PATH;
+    if (envPath) return envPath;
+
+    // Rutas comunes en Linux (Docker/VPS)
+    const linuxPaths = [
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+    ];
+
+    // Rutas en Windows
+    const winPaths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+    ];
+
+    const fs = require('fs');
+    const allPaths = process.platform === 'win32' ? winPaths : linuxPaths;
+
+    for (const p of allPaths) {
+      try {
+        if (fs.existsSync(p)) return p;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
   }
 
   private generateWithBuiltinCover(

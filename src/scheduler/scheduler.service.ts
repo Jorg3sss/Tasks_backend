@@ -4,6 +4,7 @@ import { Repository }        from 'typeorm';
 import { ConfigService }     from '@nestjs/config';
 import axios                 from 'axios';
 import { Task }              from '../tasks/entities/task.entity';
+import { TaskStatus }        from '../tasks/entities/task-status.enum';
 import { TasksService }      from '../tasks/tasks.service';
 import { DocumentParserService } from '../common/document-parser.service';
 
@@ -37,6 +38,7 @@ export class SchedulerService implements OnModuleInit {
     if (!n8nUrl) return;
 
     // Solo tareas PENDING sin solución — OVERDUE/SUBMITTED se generan manualmente
+    // Excluir PROCESSING para evitar colisiones con el scheduler
     const tasks = await this.taskRepo
       .createQueryBuilder('task')
       .leftJoin('task.solution', 'solution')
@@ -58,6 +60,14 @@ export class SchedulerService implements OnModuleInit {
       try {
         this.logger.log(`[Scheduler] Procesando tarea: "${task.title}" (ID: ${task.id})`);
         this.logger.log(`[Scheduler] Descripción original: ${task.description?.substring(0, 200) || '(vacía)'}`);
+
+        // ── Candado anti-duplicados ─────────────────────────────────
+        try {
+          await this.tasksService.acquireProcessingLock(task.id);
+        } catch (lockErr: any) {
+          this.logger.warn(`  ⏭ Tarea "${task.title}": ${lockErr.message}`);
+          continue;
+        }
 
         // Enriquecer descripción con contenido de PDFs/DOCX adjuntos
         const enrichedDescription = await this.documentParser.enrichDescription(
@@ -107,6 +117,8 @@ export class SchedulerService implements OnModuleInit {
           this.logger.log(`  ✓ Solución procesada y guardada para "${task.title}"`);
         } else {
           this.logger.warn(`  ⚠ Respuesta de n8n incompleta para "${task.title}": ${JSON.stringify(solutionData).substring(0, 300)}`);
+          // Revertir a PENDING si la respuesta es inválida
+          await this.tasksService.releaseProcessingLock(task.id, TaskStatus.PENDING);
         }
         await new Promise(r => setTimeout(r, DELAY_BETWEEN_MS));
       } catch (err: any) {
@@ -115,6 +127,8 @@ export class SchedulerService implements OnModuleInit {
         if (err.response) {
           this.logger.warn(`  Respuesta n8n: status=${err.response.status}, data=${JSON.stringify(err.response.data).substring(0, 500)}`);
         }
+        // Revertir a PENDING para permitir reintento
+        await this.tasksService.releaseProcessingLock(task.id, TaskStatus.PENDING).catch(() => {});
         break;
       }
     }

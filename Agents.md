@@ -104,6 +104,56 @@ Backend → n8n webhook → Gemini → Parse → Respond with solution in HTTP b
 - **Max batch:** 1 task per scheduler cycle (MAX_BATCH)
 - **Retry interval:** 10 minutes (RETRY_INTERVAL_MS)
 - **Only PENDING tasks:** Tasks with solutions are never re-sent
+- **PROCESSING lock:** Prevents duplicate calls to Gemini (see section 20)
+
+## 2.1 Idempotency & Credit Protection (PROCESSING State)
+
+To prevent duplicate AI calls and protect Gemini free tier credits:
+
+### States Flow
+```
+PENDING → PROCESSING → COMPLETED
+    ↑         ↓
+    └─── PENDING (on error/timeout)
+```
+
+### Implementation
+1. **Before sending to n8n:** Service acquires `PROCESSING` lock via `acquireProcessingLock(taskId)`
+2. **If already PROCESSING:** Throws `ConflictException` (prevents concurrent bursts)
+3. **On success:** Status changes to `COMPLETED`
+4. **On error/timeout:** Status reverts to `PENDING` via `releaseProcessingLock(taskId)`
+5. **Scheduler:** Only queries `PENDING` tasks (skips `PROCESSING`)
+
+### Protected Services
+- `CalendarService.processCalendarData()`
+- `TasksService.requestSolution()`
+- `SchedulerService.retryPendingAiSolutions()`
+
+## 2.2 New Response Format (N8nSolutionResponseDto)
+
+n8n now returns a structured response with three main objects:
+
+```json
+{
+  "metadata_analisis": {
+    "taskType": "ESSAY",
+    "requisitos_formato": {
+      "fuente": "Arial",
+      "tamano_fuente": 12,
+      "extension_esperada": ".pdf"
+    }
+  },
+  "solucion_academica": {
+    "titulo": "Ensayo sobre la Revolución Mexicana",
+    "desarrollo_markdown": "# Introducción\n\n..."
+  },
+  "plano_diapositivas": null
+}
+```
+
+### Validation
+- `SolucionValidatorService`: Validates word count, page estimates, typography
+- `PresentationValidatorService`: Validates slide structure (only if `plano_diapositivas` is not null)
 
 ## 3. Document Parser Agent
 Located in `DocumentParserService` (global module: `CommonModule`), this agent enriches task descriptions by extracting text from attached documents.
@@ -243,6 +293,12 @@ src/
 │   ├── covers.service.ts
 │   ├── covers.controller.ts
 │   └── entities/cover-page.entity.ts
+├── harness/               # Engineering Harness (validators, DTOs)
+│   ├── harness.module.ts  # @Global module
+│   ├── dto/
+│   │   └── n8n-solution-response.dto.ts  # Structured n8n response DTO
+│   ├── solucion-validator.service.ts     # Validates solutions (word count, format)
+│   └── presentation-validator.service.ts # Validates slide plans
 ├── mail/                  # Email notifications (SMTP Gmail)
 ├── scheduler/             # Auto-retry PENDING tasks every 10 min
 ├── subjects/              # Subject CRUD + findOrCreate
@@ -250,12 +306,27 @@ src/
 │   ├── tasks.module.ts
 │   ├── tasks.service.ts   # processAiCallback, requestSolution, createFromCalendar
 │   ├── tasks.controller.ts
-│   ├── pdf.service.ts     # PDFKit + pdf-lib for cover merging
+│   ├── pdf.service.ts     # PDFKit + pdf-lib for cover merging + Puppeteer presentations
 │   ├── zip.service.ts
 │   └── entities/          # Task, Solution, TaskType, TaskStatus
 ├── users/                 # User CRUD, profile management
 └── webhooks/              # Legacy n8n callback endpoint
 ```
+
+## 10.1 Puppeteer Presentation Engine
+
+When `plano_diapositivas` is not null, `PdfService` generates a presentation PDF using Puppeteer:
+
+- **Viewport:** 1920x1080 (16:9 panoramic)
+- **Docker args:** `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-dev-shm-usage`
+- **Layouts supported:** `titulo_centrado`, `dos_columnas`, `lista_bullets`
+- **CSS:** Uses `break-after: page` for perfect page breaks
+- **Cover merge:** After Puppeteer generates the presentation, `pdf-lib` merges the user's custom cover as the first page
+- **Chrome path:** Configurable via `CHROME_PATH` env var, auto-detects common paths
+
+### Environment Requirements
+- **Production (Docker):** Install `chromium` in Dockerfile
+- **Local:** Set `CHROME_PATH` in `.env` or have Chrome installed
 
 ## 11. Installed Dependencies (added)
 
@@ -265,6 +336,9 @@ src/
 | `pdf-parse` | Extract text from PDF documents (task descriptions) |
 | `mammoth` | Extract text from DOCX documents (task descriptions) |
 | `@types/multer` | TypeScript types for file uploads |
+| `puppeteer-core` | Headless Chrome for presentation PDF generation |
+| `class-validator` | DTO validation for n8n responses |
+| `class-transformer` | DTO transformation and nested object handling |
 
 ## 12. Mandatory Rules
 - **No hardcoded secrets:** Always use `.env` files.

@@ -12,6 +12,7 @@ import * as fs              from 'fs';
 import * as path            from 'path';
 import { User }             from '../users/entities/user.entity';
 import { TasksService }     from '../tasks/tasks.service';
+import { TaskStatus }       from '../tasks/entities/task-status.enum';
 import { RegisterCalendarDto } from './dto/register-calendar.dto';
 import { DocumentParserService } from '../common/document-parser.service';
 
@@ -241,6 +242,14 @@ export class CalendarService {
         description?.trim() ?? '',
       );
 
+      // ── Candado anti-duplicados ───────────────────────────────────
+      try {
+        await this.tasksService.acquireProcessingLock(task.id);
+      } catch (lockErr: any) {
+        this.logger.warn(`  ⏭ Tarea "${summary}": ${lockErr.message}`);
+        continue;
+      }
+
       const n8nPayload = {
         taskId:      task.id,
         title:       summary.trim(),
@@ -291,6 +300,8 @@ export class CalendarService {
           const respPreview = JSON.stringify(solutionData)?.substring(0, 300) ?? 'N/A';
           this.logger.warn(`  ⚠ Respuesta de n8n incompleta para "${summary}": ${respPreview}`);
           this.appendLog('BUG', `Respuesta n8n incompleta para: "${summary}" (taskId=${task.id}). Preview: ${respPreview}`);
+          // Revertir a PENDING si la respuesta es inválida
+          await this.tasksService.releaseProcessingLock(task.id, TaskStatus.PENDING);
         }
       } catch (err: any) {
         const errMsg = err.message || 'Error desconocido';
@@ -302,6 +313,8 @@ export class CalendarService {
         } else {
           this.appendLog('BUG', `Error llamando a n8n para: "${summary}" (taskId=${task.id}). Error: ${errMsg}`);
         }
+        // Revertir a PENDING para permitir reintento del scheduler
+        await this.tasksService.releaseProcessingLock(task.id, TaskStatus.PENDING).catch(() => {});
         // Continuar con el siguiente evento — no abortar todo el lote
         continue;
       }
