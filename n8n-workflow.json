@@ -1,0 +1,133 @@
+{
+  "name": "TaskFlow — ICS Task Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ics-task-processor",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Recibir Tarea del Backend",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 360],
+      "webhookId": "taskflow-ics-v1"
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Normalizar el body (n8n puede entregar los datos en .body o en la raíz)\nconst raw = $input.first().json.body ?? $input.first().json;\n\nconst {\n  taskId,\n  title        = 'Sin título',\n  description  = '',\n  dueDate      = '',\n  assignedDate = '',\n  userEmail    = '',\n} = raw;\n\nif (!taskId) throw new Error('taskId es obligatorio en el payload del backend');\n\nconst prompt = [\n  'Eres un asistente académico universitario. Analiza la siguiente tarea y devuelve ÚNICAMENTE un objeto JSON sin markdown ni texto extra.',\n  '',\n  'TAREA:',\n  `Título: ${title}`,\n  `Descripción: ${description || 'Sin descripción'}`,\n  `Fecha de entrega: ${dueDate}`,\n  '',\n  'Formato de respuesta (solo JSON):',\n  '{',\n  '  \"subjectName\": \"nombre completo de la asignatura universitaria más probable, o DESCONOCIDA si no puedes determinarlo\",',\n  '  \"taskType\": \"uno de: ESSAY, CODE_SNIPPET, UML_DIAGRAM, PRESENTATION, READING, EXAM, OTHER\",',\n  '  \"content\": \"solución completa y detallada en formato Markdown en español\"',\n  '}',\n].join('\\n');\n\nreturn [{ json: { taskId, userEmail, title, prompt } }];"
+      },
+      "id": "node-build-prompt",
+      "name": "Construir Prompt para Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 360]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        { \"text\": {{ JSON.stringify($json.prompt) }} }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.4,\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "node-gemini-call",
+      "name": "Llamar Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 360]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Parsear la respuesta de Gemini y combinar con datos anteriores\nconst geminiResponse = $input.first().json;\nconst prevData = $('Construir Prompt para Gemini').first().json;\n\nlet parsed = {};\ntry {\n  const rawText = geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';\n  // Gemini a veces envuelve en ```json ... ``` aunque se pida sin markdown\n  const cleaned = rawText.replace(/```json\\n?/g, '').replace(/```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  parsed = {\n    subjectName: 'DESCONOCIDA',\n    taskType: 'OTHER',\n    content: `Error al parsear respuesta de Gemini: ${e.message}`,\n  };\n}\n\nconst allowedTypes = ['ESSAY','CODE_SNIPPET','UML_DIAGRAM','PRESENTATION','READING','EXAM','OTHER'];\nconst taskType = allowedTypes.includes(parsed.taskType) ? parsed.taskType : 'OTHER';\n\nreturn [{\n  json: {\n    taskId:      prevData.taskId,\n    userEmail:   prevData.userEmail,\n    subjectName: parsed.subjectName || 'DESCONOCIDA',\n    taskType,\n    content:     parsed.content || 'Solución no disponible.',\n  }\n}];"
+      },
+      "id": "node-parse-gemini",
+      "name": "Parsear Respuesta de Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 360]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://165.245.148.11:3001/api/webhooks/n8n/task-solution/{{ $json.taskId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-webhook-secret", "value": "={{ $env.N8N_SECRET_KEY }}" },
+            { "name": "Content-Type",     "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\":     {{ JSON.stringify($json.content) }},\n  \"subjectName\": {{ JSON.stringify($json.subjectName) }},\n  \"taskType\":    {{ JSON.stringify($json.taskType) }},\n  \"userEmail\":   {{ JSON.stringify($json.userEmail) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node-backend-webhook",
+      "name": "Enviar Solución al Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1140, 360]
+    },
+
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true, \"taskId\": $('Parsear Respuesta de Gemini').first().json.taskId }",
+        "options": {}
+      },
+      "id": "node-respond",
+      "name": "Responder al Backend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1380, 360]
+    }
+  ],
+
+  "connections": {
+    "Recibir Tarea del Backend": {
+      "main": [[{ "node": "Construir Prompt para Gemini", "type": "main", "index": 0 }]]
+    },
+    "Construir Prompt para Gemini": {
+      "main": [[{ "node": "Llamar Gemini API", "type": "main", "index": 0 }]]
+    },
+    "Llamar Gemini API": {
+      "main": [[{ "node": "Parsear Respuesta de Gemini", "type": "main", "index": 0 }]]
+    },
+    "Parsear Respuesta de Gemini": {
+      "main": [[{ "node": "Enviar Solución al Backend", "type": "main", "index": 0 }]]
+    },
+    "Enviar Solución al Backend": {
+      "main": [[{ "node": "Responder al Backend", "type": "main", "index": 0 }]]
+    }
+  },
+
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": [{ "name": "taskflow" }],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
