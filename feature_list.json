@@ -16,7 +16,12 @@
     { "id": "R012", "rule": "Ejecutar verificación de seguridad en cada cambio", "severity": "hard", "category": "security" },
     { "id": "R013", "rule": "Seguir feedback de security — si hay issues, crear features", "severity": "hard", "category": "security" },
     { "id": "R014", "rule": "Guardar todos los logs en logs/ y progress/", "severity": "hard", "category": "workflow" },
-    { "id": "R015", "rule": "Subagentes escriben resultados en archivos, NO en chat (anti-teléfono-descompuesto)", "severity": "hard", "category": "workflow" }
+    { "id": "R015", "rule": "Subagentes escriben resultados en archivos, NO en chat (anti-teléfono-descompuesto)", "severity": "hard", "category": "workflow" },
+    { "id": "R016", "rule": "Desglosar cada tarea en features en feature_list.json antes de implementar", "severity": "hard", "category": "workflow" },
+    { "id": "R017", "rule": "Actualizar progress/currents.md después de cada cambio", "severity": "hard", "category": "workflow" },
+    { "id": "R018", "rule": "Actualizar progress/history.md al completar tareas", "severity": "hard", "category": "workflow" },
+    { "id": "R019", "rule": "Reviewer debe escribir feedback en progress/review.md después de cada revisión", "severity": "hard", "category": "workflow" },
+    { "id": "R020", "rule": "Developer debe escribir log en progress/developer.md después de cada implementación", "severity": "hard", "category": "workflow" }
   ],
   "features": [
     {
@@ -126,9 +131,11 @@
         "CalendarService filtra tareas DISCARDED (no envía a n8n)",
         "Schema de n8n actualizado con nuevos tipos"
       ],
-      "status": "backlog",
+      "status": "completed",
       "priority": "medium",
-      "assignedAgent": "developer"
+      "assignedAgent": "developer",
+      "createdAt": "2026-05-31T00:00:00Z",
+      "completedAt": "2026-06-01T00:00:00Z"
     },
     {
       "id": "F008",
@@ -145,10 +152,107 @@
         "Jest instalado con test unitario de processAiCallback",
         "Git workflow configurado (ramas + commits)"
       ],
-      "status": "in_progress",
+      "status": "completed",
       "priority": "high",
       "assignedAgent": "developer",
-      "createdAt": "2026-05-31T00:00:00Z"
+      "createdAt": "2026-05-31T00:00:00Z",
+      "completedAt": "2026-06-01T00:00:00Z"
+    },
+    {
+      "id": "F009",
+      "name": "n8n_response_dto_validation",
+      "title": "DTO de validación estricta para respuesta de n8n",
+      "description": "Crear N8nSolutionResponseDto con class-validator para validar la estructura JSON que devuelve n8n/Gemini.",
+      "acceptance": [
+        "DTO contiene metadata_analisis con taskType (enum) y requisitos_formato",
+        "DTO contiene solucion_academica con titulo y desarrollo_markdown",
+        "DTO contiene plano_diapositivas como objeto nullable con validación de slides",
+        "Cada campo tiene decoradores de class-validator apropiados",
+        "Se usa class-transformer para nested objects"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "assignedAgent": "developer",
+      "createdAt": "2026-06-01T00:00:00Z",
+      "completedAt": "2026-06-01T03:00:00Z"
+    },
+    {
+      "id": "F010",
+      "name": "idempotency_processing_lock",
+      "title": "Sistema de candados PROCESSING para idempotencia",
+      "description": "Añadir estado PROCESSING al TaskStatus y implementar acquireProcessingLock/releaseProcessingLock para evitar llamadas duplicadas a Gemini.",
+      "acceptance": [
+        "PROCESSING añadido a TaskStatus enum",
+        "acquireProcessingLock() verifica si ya está PROCESSING y lanza ConflictException",
+        "releaseProcessingLock() revierte a PENDING en caso de error",
+        "CalendarService usa lock antes de enviar a n8n",
+        "TasksService.requestSolution() usa lock con try/catch",
+        "SchedulerService usa lock antes de enviar a n8n",
+        "No hay llamadas duplicadas a Gemini bajo concurrencia"
+      ],
+      "status": "completed",
+      "priority": "critical",
+      "assignedAgent": "developer",
+      "createdAt": "2026-06-01T00:00:00Z",
+      "completedAt": "2026-06-01T03:30:00Z"
+    },
+    {
+      "id": "F011",
+      "name": "harness_module_validators",
+      "title": "HarnessModule con servicios de validación",
+      "description": "Crear módulo global HarnessModule con SolucionValidatorService y PresentationValidatorService.",
+      "acceptance": [
+        "HarnessModule es @Global y se inyecta en cualquier módulo",
+        "SolucionValidatorService valida palabras, cuartillas, tipografía",
+        "PresentationValidatorService valida estructura de slides y layouts",
+        "PresentationValidatorService solo activa si plano_diapositivas no es null",
+        "Ambos servicios escriben logs de validación"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "assignedAgent": "developer",
+      "createdAt": "2026-06-01T00:00:00Z",
+      "completedAt": "2026-06-01T03:30:00Z"
+    },
+    {
+      "id": "F012",
+      "name": "puppeteer_presentation_engine",
+      "title": "Motor de presentaciones con Puppeteer",
+      "description": "Implementar generación de PDFs de presentación usando Puppeteer con layouts dinámicos y CSS break-after:page.",
+      "acceptance": [
+        "generatePresentationPdf() en PdfService usa puppeteer-core",
+        "Viewport configurado a 1920x1080 (16:9 panorámico)",
+        "Docker args: --no-sandbox, --disable-setuid-sandbox",
+        "Soporta layouts: titulo_centrado, dos_columnas, lista_bullets",
+        "CSS break-after: page para saltos de página perfectos",
+        "Portada personalizada se mergea con pdf-lib después de generar",
+        "Chrome path configurable via CHROME_PATH env var",
+        "Auto-detección de Chrome en rutas comunes"
+      ],
+      "status": "completed",
+      "priority": "high",
+      "assignedAgent": "developer",
+      "createdAt": "2026-06-01T00:00:00Z",
+      "completedAt": "2026-06-01T04:00:00Z"
+    },
+    {
+      "id": "F013",
+      "name": "harness_workflow_rules",
+      "title": "Reglas estrictas del flujo del harness",
+      "description": "Añadir reglas R016-R020 para forzar el flujo: desglosar en feature_list, actualizar currents/history, reviewer escribe review, developer escribe log.",
+      "acceptance": [
+        "R016: Desglosar cada tarea en features en feature_list.json",
+        "R017: Actualizar progress/currents.md después de cada cambio",
+        "R018: Actualizar progress/history.md al completar tareas",
+        "R019: Reviewer escribe feedback en progress/review.md",
+        "R020: Developer escribe log en progress/developer.md",
+        "Reglas añadidas a Agents.md",
+        "Reglas añadidas a feature_list.json rules array"
+      ],
+      "status": "in_progress",
+      "priority": "critical",
+      "assignedAgent": "developer",
+      "createdAt": "2026-06-01T04:00:00Z"
     }
   ]
 }

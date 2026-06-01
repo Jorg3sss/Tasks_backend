@@ -492,3 +492,121 @@ Tareas de Moodle que no requieren procesamiento IA se marcan como `DISCARDED`:
 - Tareas repetidas o de prueba
 
 Estas tareas se crean en BD para tracking pero NO se envían a n8n.
+
+## 20. Flujo Estricto del Harness (OBLIGATORIO)
+
+### Regla Absoluta
+Cada tarea que reciba el developer DEBE seguir este flujo completo. No se puede saltar ningún paso.
+
+### Flujo Paso a Paso
+
+```
+1. RECIBIR TAREA
+   └─ Leader recibe tarea del usuario
+
+2. DESGLOSAR EN FEATURES
+   └─ Leader desglosa la tarea en features individuales
+   └─ Cada feature se añade a feature_list.json con:
+      - id (FXXX)
+      - name (snake_case)
+      - title (legible)
+      - description
+      - acceptance (criterios de aceptación)
+      - status: "pending"
+      - priority
+      - assignedAgent
+
+3. ASIGNAR A AGENTE
+   └─ Leader asigna feature al agente apropiado
+   └─ Marca status como "in_progress" en feature_list.json
+
+4. IMPLEMENTAR (Developer)
+   └─ Developer implementa el código
+   └─ Developer escribe en progress/developer.md:
+      - Qué se implementó
+      - Archivos creados/modificados
+      - Tests ejecutados
+      - Resultado del build
+   └─ Developer actualiza progress/currents.md con estado actual
+   └─ Developer crea rama + commit
+
+5. LANZAR REVIEWER (OBLIGATORIO)
+   └─ Después de CADA implementación, se lanza reviewer
+   └─ Reviewer revisa código contra reglas del proyecto
+   └─ Reviewer ejecuta npm run build y npm test
+   └─ Reviewer escribe feedback COMPLETO en progress/review.md:
+      - Estado: PASS / FAIL / NEEDS_CHANGES
+      - Hallazgos críticos, mayores, menores
+      - Verificaciones realizadas
+      - Siguientes pasos
+
+6. ACTUALIZAR ESTADO
+   └─ Si reviewer aprueba (PASS):
+      - Marcar feature como "completed" en feature_list.json
+      - Escribir en progress/history.md con:
+        * Fecha
+        * Feature ID
+        * Agente
+        * Archivos modificados
+        * Commit hash
+      - Actualizar progress/currents.md
+   └─ Si reviewer rechaza (FAIL/NEEDS_CHANGES):
+      - Developer corrige issues
+      - Volver al paso 5
+
+7. ACTUALIZAR CURRENTS
+   └─ Después de CADA cambio, actualizar progress/currents.md con:
+      - Tarea en curso (feature ID, estado, agente)
+      - Última completada
+      - Resumen de cambios recientes
+      - Archivos modificados
+      - Estado de verificación (build, tests)
+      - Siguiente paso
+```
+
+### Archivos que DEBEN Actualizarse
+
+| Archivo | Cuándo | Quién |
+|---------|--------|-------|
+| `feature_list.json` | Al recibir tarea (desglosar) + al completar | Leader / Developer |
+| `progress/currents.md` | Después de CADA cambio | Developer |
+| `progress/history.md` | Al completar cada feature | Developer |
+| `progress/review.md` | Después de CADA revisión | Reviewer |
+| `progress/developer.md` | Después de CADA implementación | Developer |
+| `progress/errors.md` | Cuando hay errores | Cualquier agente |
+
+### Consecuencias de No Seguir el Flujo
+- Si no se actualiza feature_list.json → la tarea no se puede trackear
+- Si no se actualiza currents.md → el siguiente agente no sabe el estado
+- Si no se lanza reviewer → no hay verificación de calidad
+- Si no se escribe en review.md → no hay feedback documentado
+- Si no se actualiza history.md → se pierde el registro histórico
+
+### Ejemplo de Flujo Correcto
+```
+1. Usuario: "Añadir validación de emails"
+2. Leader desglosa en feature_list.json:
+   - F014: Email validation service
+   - F015: Email validation decorator
+3. Leader asigna F014 a developer
+4. Developer implementa, escribe en developer.md
+5. Developer actualiza currents.md
+6. Developer crea rama + commit
+7. Lanza reviewer
+8. Reviewer escribe en review.md: PASS
+9. Developer marca F014 como completed en feature_list.json
+10. Developer escribe en history.md
+11. Developer actualiza currents.md
+```
+
+### Ejemplo de Flujo INCORRECTO
+```
+1. Usuario: "Añadir validación de emails"
+2. Developer implementa directamente
+3. Developer hace commit
+4. No se actualiza feature_list.json
+5. No se escribe en progress/
+6. No se lanza reviewer
+7. No se actualiza history.md
+→ VIOLACIÓN DE REGLAS R003, R016, R017, R018, R019, R020
+```
